@@ -384,6 +384,30 @@
                           <div class="h-px bg-gray-200 dark:bg-gray-600/50"></div>
                           <div class="space-y-2">
                             <div class="text-sm font-semibold text-white dark:text-gray-900">
+                              Grok
+                            </div>
+                            <div class="text-gray-200 dark:text-gray-600">
+                              自定义中转没有官方会话额度窗口。这里展示本地滚动用量（费用 / tokens /
+                              请求次数），不是上游配额进度。
+                            </div>
+                            <div class="space-y-1 text-gray-200 dark:text-gray-600">
+                              <div class="flex items-start gap-2">
+                                <i class="fas fa-clock mt-[2px] text-[10px] text-indigo-500"></i>
+                                <span class="font-medium text-white dark:text-gray-900"
+                                  >5h / 1d：按小时桶汇总，费用来自 model_pricing.json。</span
+                                >
+                              </div>
+                              <div class="flex items-start gap-2">
+                                <i class="fas fa-history mt-[2px] text-[10px] text-emerald-500"></i>
+                                <span class="font-medium text-white dark:text-gray-900"
+                                  >7d / 30d：按天桶汇总，覆盖最近一周和一个月。</span
+                                >
+                              </div>
+                            </div>
+                          </div>
+                          <div class="h-px bg-gray-200 dark:bg-gray-600/50"></div>
+                          <div class="space-y-2">
+                            <div class="text-sm font-semibold text-white dark:text-gray-900">
                               Claude OAuth 账户
                             </div>
                             <div class="text-gray-200 dark:text-gray-600">
@@ -1235,6 +1259,35 @@
                       <span class="text-xs">N/A</span>
                     </div>
                   </div>
+                  <div v-else-if="account.platform === 'grok'" class="space-y-1.5">
+                    <div
+                      v-for="window in grokRollingWindows"
+                      :key="window.key"
+                      class="rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700/70"
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span
+                          class="inline-flex min-w-[32px] justify-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-600/40 dark:text-zinc-200"
+                        >
+                          {{ window.label }}
+                        </span>
+                        <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">
+                          ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
+                        </span>
+                      </div>
+                      <div
+                        class="mt-0.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400"
+                      >
+                        <span
+                          >{{
+                            formatNumber(account.rollingUsage?.[window.key]?.tokens || 0)
+                          }}
+                          tokens</span
+                        >
+                        <span>{{ account.rollingUsage?.[window.key]?.requests || 0 }} 次</span>
+                      </div>
+                    </div>
+                  </div>
                   <div v-else class="text-sm text-gray-400">
                     <span class="text-xs">N/A</span>
                   </div>
@@ -1837,6 +1890,35 @@
                 </div>
               </div>
               <div v-if="!account.codexUsage" class="text-xs text-gray-400">暂无统计</div>
+            </div>
+            <div v-else-if="account.platform === 'grok'" class="space-y-1.5">
+              <div
+                v-for="window in grokRollingWindows"
+                :key="window.key"
+                class="rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span
+                    class="inline-flex min-w-[32px] justify-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-600/40 dark:text-zinc-200"
+                  >
+                    {{ window.label }}
+                  </span>
+                  <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">
+                    ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
+                  </span>
+                </div>
+                <div
+                  class="mt-0.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400"
+                >
+                  <span
+                    >{{
+                      formatNumber(account.rollingUsage?.[window.key]?.tokens || 0)
+                    }}
+                    tokens</span
+                  >
+                  <span>{{ account.rollingUsage?.[window.key]?.requests || 0 }} 次</span>
+                </div>
+              </div>
             </div>
 
             <!-- 最后使用时间 -->
@@ -2763,7 +2845,10 @@ const openAccountUsageModal = async (account) => {
   if (response.success) {
     const data = response.data || {}
     accountUsageHistory.value = data.history || []
-    accountUsageSummary.value = data.summary || {}
+    accountUsageSummary.value = {
+      ...(data.summary || {}),
+      rollingUsage: data.rollingUsage || data.summary?.rollingUsage || null
+    }
     accountUsageOverview.value = data.overview || {}
     accountUsageGeneratedAt.value = data.generatedAt || ''
   } else {
@@ -5006,6 +5091,13 @@ const getCodexWindowLabel = (type) => {
   }
   return '5h'
 }
+
+const grokRollingWindows = [
+  { key: 'fiveHour', label: '5h' },
+  { key: 'oneDay', label: '1d' },
+  { key: 'sevenDay', label: '7d' },
+  { key: 'thirtyDay', label: '30d' }
+]
 
 // 格式化剩余时间
 const formatCodexRemaining = (usageItem) => {

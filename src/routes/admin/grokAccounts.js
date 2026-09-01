@@ -156,10 +156,11 @@ router.get('/grok-accounts', authenticateAdmin, async (req, res) => {
     }
 
     const accountIds = accounts.map((a) => a.id)
-    const [allApiKeys, allGroupInfosMap, dailyCostMap] = await Promise.all([
+    const [allApiKeys, allGroupInfosMap, dailyCostMap, rollingUsageMap] = await Promise.all([
       apiKeyService.getAllApiKeysLite(),
       accountGroupService.batchGetAccountGroupsByIndex(accountIds, 'grok'),
       redis.batchGetAccountDailyCost(accountIds),
+      redis.batchGetAccountRollingUsage(accountIds, { fallbackModel: 'grok-4.6' }),
       Promise.all(accountIds.map((id) => grokAccountService.checkAndClearRateLimit(id)))
     ])
 
@@ -227,7 +228,8 @@ router.get('/grok-accounts', authenticateAdmin, async (req, res) => {
           daily: { ...usageStats.daily, cost: dailyCostMap.get(account.id) || 0 },
           total: usageStats.total,
           monthly: usageStats.monthly
-        }
+        },
+        rollingUsage: rollingUsageMap.get(account.id) || null
       }
     })
 

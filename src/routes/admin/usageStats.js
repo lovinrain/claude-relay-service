@@ -114,6 +114,7 @@ const accountTypeNames = {
   gemini: 'Gemini',
   'gemini-api': 'Gemini API',
   droid: 'Droid',
+  grok: 'Grok',
   bedrock: 'AWS Bedrock',
   unknown: '未知渠道'
 }
@@ -127,6 +128,9 @@ const resolveAccountByPlatform = async (accountId, platform) => {
     openai: openaiAccountService,
     'openai-responses': openaiResponsesAccountService,
     droid: droidAccountService,
+    grok: {
+      getAccount: (id) => grokAccountService.getAccount(id, { includeSecrets: false })
+    },
     ccr: ccrAccountService,
     bedrock: bedrockAccountService
   }
@@ -253,6 +257,7 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
       'gemini',
       'gemini-api',
       'droid',
+      'grok',
       'bedrock'
     ]
     if (!allowedPlatforms.includes(platform)) {
@@ -267,6 +272,7 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
       'openai-responses': 'openai-responses',
       'gemini-api': 'gemini-api',
       droid: 'droid',
+      grok: 'grok',
       bedrock: 'bedrock'
     }
 
@@ -278,6 +284,7 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
       gemini: 'gemini-1.5-flash',
       'gemini-api': 'gemini-2.0-flash',
       droid: 'unknown',
+      grok: 'grok-4.6',
       bedrock: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
     }
 
@@ -308,6 +315,9 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
         }
         case 'droid':
           accountData = await droidAccountService.getAccount(accountId)
+          break
+        case 'grok':
+          accountData = await grokAccountService.getAccount(accountId, { includeSecrets: false })
           break
         case 'bedrock': {
           const result = await bedrockAccountService.getAccount(accountId)
@@ -478,11 +488,13 @@ router.get('/accounts/:accountId/usage-history', authenticateAdmin, async (req, 
     const avgDailyTokens = actualDaysForAvg > 0 ? totalTokens / actualDaysForAvg : 0
 
     const todayData = history.length > 0 ? history[history.length - 1] : null
+    const rollingUsage = await redis.getAccountRollingUsage(accountId, { fallbackModel })
 
     return res.json({
       success: true,
       data: {
         history,
+        rollingUsage,
         summary: {
           days: daysCount,
           actualDaysUsed: actualDaysForAvg, // 实际使用的天数（用于计算日均值）
@@ -2741,7 +2753,8 @@ router.get('/api-keys/:keyId/usage-records', authenticateAdmin, async (req, res)
       { type: 'openai-responses', getter: (id) => openaiResponsesAccountService.getAccount(id) },
       { type: 'gemini', getter: (id) => geminiAccountService.getAccount(id) },
       { type: 'gemini-api', getter: (id) => geminiApiAccountService.getAccount(id) },
-      { type: 'droid', getter: (id) => droidAccountService.getAccount(id) }
+      { type: 'droid', getter: (id) => droidAccountService.getAccount(id) },
+      { type: 'grok', getter: (id) => grokAccountService.getAccount(id, { includeSecrets: false }) }
     ]
 
     const accountCache = new Map()

@@ -66,6 +66,26 @@
             <div class="loading-spinner h-12 w-12 border-4 border-blue-500" />
           </div>
           <template v-else>
+            <div v-if="rollingWindows.length" class="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <div
+                v-for="window in rollingWindows"
+                :key="window.key"
+                class="rounded-2xl border border-zinc-100 bg-white/80 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/70"
+              >
+                <p
+                  class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                >
+                  {{ window.label }}
+                </p>
+                <p class="mt-2 text-xl font-semibold text-gray-900 dark:text-gray-100">
+                  {{ window.cost }}
+                </p>
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  {{ window.tokens }} tokens · {{ window.requests }} 次
+                </p>
+              </div>
+            </div>
+
             <!-- 关键指标 -->
             <div class="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div
@@ -367,6 +387,7 @@ const platformLabelMap = {
   gemini: 'Gemini',
   'gemini-api': 'Gemini API',
   droid: 'Droid',
+  grok: 'Grok',
   bedrock: 'Claude AWS Bedrock'
 }
 
@@ -390,6 +411,31 @@ const chartColors = computed(() => ({
 const totalTokens = computed(() => props.summary?.totalTokens || 0)
 const overviewInputTokens = computed(() => props.overview?.total?.inputTokens || 0)
 const overviewOutputTokens = computed(() => props.overview?.total?.outputTokens || 0)
+
+const rollingUsageData = computed(
+  () => props.summary?.rollingUsage || props.account?.rollingUsage || null
+)
+
+const rollingWindows = computed(() => {
+  const rolling = rollingUsageData.value
+  if (!rolling) {
+    return []
+  }
+  return [
+    { key: 'fiveHour', label: '近 5 小时' },
+    { key: 'oneDay', label: '近 1 天' },
+    { key: 'sevenDay', label: '近 7 天' },
+    { key: 'thirtyDay', label: '近 30 天' }
+  ].map((window) => {
+    const data = rolling[window.key] || {}
+    return {
+      ...window,
+      cost: data.formattedCost || formatCost(data.cost || 0),
+      tokens: formatNumber(data.tokens || 0),
+      requests: formatNumber(data.requests || 0)
+    }
+  })
+})
 
 const formatCost = (value) => {
   const num = Number(value || 0)
