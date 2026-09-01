@@ -93,22 +93,22 @@
               </div>
             </div>
 
-            <div v-if="rollingWindows.length" class="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <div v-if="rollingWindows.length" class="mb-5 grid grid-cols-2 gap-2 xl:grid-cols-4">
               <div
                 v-for="window in rollingWindows"
                 :key="window.key"
-                class="rounded-2xl border border-zinc-100 bg-white/80 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/70"
+                class="rounded-xl border border-zinc-100 bg-white/80 px-3 py-2 shadow-sm dark:border-gray-700 dark:bg-gray-900/70"
               >
-                <p
-                  class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
-                >
-                  {{ window.label }}
-                </p>
-                <p class="mt-2 text-xl font-semibold text-gray-900 dark:text-gray-100">
-                  {{ window.cost }}
-                </p>
-                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  {{ window.tokens }} tokens · {{ window.requests }} 次
+                <div class="flex items-baseline justify-between gap-2">
+                  <p class="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                    {{ window.label }}
+                  </p>
+                  <p class="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                    {{ window.cost }}
+                  </p>
+                </div>
+                <p class="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+                  {{ window.tokens }} · {{ window.requests }} 次
                 </p>
               </div>
             </div>
@@ -471,10 +471,10 @@ const rollingWindows = computed(() => {
     return []
   }
   return [
-    { key: 'fiveHour', label: '近 5 小时' },
-    { key: 'oneDay', label: '近 1 天' },
-    { key: 'sevenDay', label: '近 7 天' },
-    { key: 'thirtyDay', label: '近 30 天' }
+    { key: 'fiveHour', label: '5h' },
+    { key: 'oneDay', label: '1d' },
+    { key: 'sevenDay', label: '7d' },
+    { key: 'thirtyDay', label: '30d' }
   ].map((window) => {
     const data = rolling[window.key] || {}
     return {

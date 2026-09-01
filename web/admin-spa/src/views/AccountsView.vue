@@ -1315,30 +1315,22 @@
                       </div>
                     </div>
                     <div
-                      v-for="window in grokRollingWindows"
-                      :key="window.key"
-                      class="rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700/70"
+                      class="grid grid-cols-2 gap-x-2 gap-y-0.5 rounded-lg bg-gray-50 px-2 py-1.5 text-[11px] dark:bg-gray-700/70"
                     >
-                      <div class="flex items-center justify-between gap-2">
-                        <span
-                          class="inline-flex min-w-[32px] justify-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-600/40 dark:text-zinc-200"
-                        >
-                          {{ window.label }}
-                        </span>
-                        <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">
-                          ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
-                        </span>
-                      </div>
                       <div
-                        class="mt-0.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400"
+                        v-for="window in grokRollingWindows"
+                        :key="window.key"
+                        class="flex min-w-0 items-baseline justify-between gap-1"
                       >
+                        <span class="font-medium text-zinc-600 dark:text-zinc-300">{{
+                          window.label
+                        }}</span>
                         <span
-                          >{{
-                            formatNumber(account.rollingUsage?.[window.key]?.tokens || 0)
-                          }}
-                          tokens</span
+                          class="truncate tabular-nums text-gray-800 dark:text-gray-100"
+                          :title="formatGrokRollingLine(account.rollingUsage?.[window.key])"
                         >
-                        <span>{{ account.rollingUsage?.[window.key]?.requests || 0 }} 次</span>
+                          {{ formatGrokRollingLine(account.rollingUsage?.[window.key]) }}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1997,30 +1989,22 @@
                 </div>
               </div>
               <div
-                v-for="window in grokRollingWindows"
-                :key="window.key"
-                class="rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700"
+                class="grid grid-cols-2 gap-x-2 gap-y-0.5 rounded-lg bg-gray-50 px-2 py-1.5 text-[11px] dark:bg-gray-700"
               >
-                <div class="flex items-center justify-between gap-2">
-                  <span
-                    class="inline-flex min-w-[32px] justify-center rounded-full bg-zinc-200 px-2 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-600/40 dark:text-zinc-200"
-                  >
-                    {{ window.label }}
-                  </span>
-                  <span class="text-xs font-semibold text-gray-800 dark:text-gray-100">
-                    ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
-                  </span>
-                </div>
                 <div
-                  class="mt-0.5 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400"
+                  v-for="window in grokRollingWindows"
+                  :key="window.key"
+                  class="flex min-w-0 items-baseline justify-between gap-1"
                 >
+                  <span class="font-medium text-zinc-600 dark:text-zinc-300">{{
+                    window.label
+                  }}</span>
                   <span
-                    >{{
-                      formatNumber(account.rollingUsage?.[window.key]?.tokens || 0)
-                    }}
-                    tokens</span
+                    class="truncate tabular-nums text-gray-800 dark:text-gray-100"
+                    :title="formatGrokRollingLine(account.rollingUsage?.[window.key])"
                   >
-                  <span>{{ account.rollingUsage?.[window.key]?.requests || 0 }} 次</span>
+                    {{ formatGrokRollingLine(account.rollingUsage?.[window.key]) }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -5202,6 +5186,13 @@ const grokRollingWindows = [
   { key: 'sevenDay', label: '7d' },
   { key: 'thirtyDay', label: '30d' }
 ]
+
+const formatGrokRollingLine = (usage) => {
+  const cost = formatCost(usage?.cost || 0)
+  const tokens = formatNumber(usage?.tokens || 0)
+  const requests = usage?.requests || 0
+  return `$${cost} · ${tokens}/${requests}`
+}
 
 const grokQuotaWindows = (account) => {
   const usage = account?.grokUsage
