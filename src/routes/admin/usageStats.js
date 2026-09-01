@@ -8,6 +8,7 @@ const geminiApiAccountService = require('../../services/account/geminiApiAccount
 const openaiAccountService = require('../../services/account/openaiAccountService')
 const openaiResponsesAccountService = require('../../services/account/openaiResponsesAccountService')
 const droidAccountService = require('../../services/account/droidAccountService')
+const grokAccountService = require('../../services/account/grokAccountService')
 const bedrockAccountService = require('../../services/account/bedrockAccountService')
 const redis = require('../../models/redis')
 const { authenticateAdmin } = require('../../middleware/auth')
@@ -1235,7 +1236,7 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
   try {
     const { granularity = 'day', group = 'claude', days = 7, startDate, endDate } = req.query
 
-    const allowedGroups = ['claude', 'openai', 'gemini', 'droid', 'bedrock']
+    const allowedGroups = ['claude', 'openai', 'gemini', 'droid', 'grok', 'bedrock']
     if (!allowedGroups.includes(group)) {
       return res.status(400).json({
         success: false,
@@ -1248,6 +1249,7 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
       openai: 'OpenAI账户',
       gemini: 'Gemini账户',
       droid: 'Droid账户',
+      grok: 'Grok账户',
       bedrock: 'Bedrock账户'
     }
 
@@ -1340,6 +1342,17 @@ router.get('/account-usage-trend', authenticateAdmin, async (req, res) => {
           id,
           name: account.name || account.ownerEmail || account.ownerName || `Droid账号 ${shortId}`,
           platform: 'droid'
+        }
+      })
+    } else if (group === 'grok') {
+      const grokAccounts = await grokAccountService.getAllAccounts(true)
+      accounts = grokAccounts.map((account) => {
+        const id = String(account.id || '')
+        const shortId = id ? id.slice(0, 8) : '未知'
+        return {
+          id,
+          name: account.name || account.email || `Grok账号 ${shortId}`,
+          platform: 'grok'
         }
       })
     } else if (group === 'bedrock') {
