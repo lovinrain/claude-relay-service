@@ -131,8 +131,8 @@
                         : platform === 'grok'
                           ? 'Grok 专属账号'
                           : platform === 'gemini'
-                          ? 'Gemini OAuth 专属账号'
-                          : 'OAuth 专属账号'
+                            ? 'Gemini OAuth 专属账号'
+                            : 'OAuth 专属账号'
                 }}
               </div>
               <div
@@ -309,8 +309,7 @@ const props = defineProps({
   platform: {
     type: String,
     required: true,
-    validator: (value) =>
-      ['claude', 'gemini', 'openai', 'bedrock', 'droid', 'grok'].includes(value)
+    validator: (value) => ['claude', 'gemini', 'openai', 'bedrock', 'droid', 'grok'].includes(value)
   },
   accounts: {
     type: Array,

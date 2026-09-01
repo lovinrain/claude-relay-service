@@ -2131,7 +2131,8 @@
                     v-else-if="form.platform === 'grok'"
                     class="mb-2 text-sm text-blue-800 dark:text-blue-300"
                   >
-                    请输入 xAI OAuth Access Token。建议同时填写 Refresh Token，以便自动刷新订阅凭证。
+                    请输入 xAI OAuth Access Token。建议同时填写 Refresh
+                    Token，以便自动刷新订阅凭证。
                   </p>
                   <div
                     class="mb-2 mt-2 rounded-lg border border-blue-300 bg-white/80 p-3 dark:border-blue-600 dark:bg-gray-800/80"
@@ -2233,7 +2234,9 @@
 
               <div
                 v-if="
-                  form.platform === 'openai' || form.platform === 'droid' || form.platform === 'grok'
+                  form.platform === 'openai' ||
+                  form.platform === 'droid' ||
+                  form.platform === 'grok'
                 "
               >
                 <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
@@ -4510,11 +4513,7 @@ const form = ref({
     if (platform === 'grok') {
       return props.account?.authType === 'api_key' ? 'apikey' : 'oauth'
     }
-    if (
-      platform === 'gemini' ||
-      platform === 'gemini-antigravity' ||
-      platform === 'openai'
-    )
+    if (platform === 'gemini' || platform === 'gemini-antigravity' || platform === 'openai')
       return 'oauth'
     if (platform === 'claude') return 'oauth'
     return 'manual'
