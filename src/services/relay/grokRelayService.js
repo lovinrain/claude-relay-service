@@ -128,6 +128,14 @@ class GrokRelayService {
       }
 
       const response = await axios(requestOptions)
+      grokAccountService
+        .recordQuotaObservation(account.id, response.headers, {
+          statusCode: response.status,
+          model: requestBody?.model || req.body?.model || ''
+        })
+        .catch((error) => {
+          logger.debug(`Failed to record Grok quota headers: ${error.message}`)
+        })
 
       if (response.status >= 400) {
         let errorData = response.data

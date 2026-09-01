@@ -66,6 +66,33 @@
             <div class="loading-spinner h-12 w-12 border-4 border-blue-500" />
           </div>
           <template v-else>
+            <div
+              v-if="account?.grokUsage"
+              class="mb-5 rounded-2xl border border-zinc-100 bg-white/80 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/70"
+            >
+              <div class="mb-3 flex items-center justify-between">
+                <p class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  {{ account.grokUsage.planLabel || 'Grok OAuth' }} 配额
+                </p>
+                <span class="text-xs text-gray-400">
+                  {{
+                    account.grokUsage.headersObserved
+                      ? '来自 xAI 响应头'
+                      : '尚未观察到上游配额头，可先点测试'
+                  }}
+                </span>
+              </div>
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div v-for="window in grokQuotaCards" :key="window.key">
+                  <p class="text-xs uppercase tracking-wide text-gray-500">{{ window.label }}</p>
+                  <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    {{ window.value }}
+                  </p>
+                  <p class="text-xs text-gray-400">{{ window.subtitle }}</p>
+                </div>
+              </div>
+            </div>
+
             <div v-if="rollingWindows.length" class="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
               <div
                 v-for="window in rollingWindows"
@@ -415,6 +442,28 @@ const overviewOutputTokens = computed(() => props.overview?.total?.outputTokens 
 const rollingUsageData = computed(
   () => props.summary?.rollingUsage || props.account?.rollingUsage || null
 )
+
+const grokQuotaCards = computed(() => {
+  const usage = props.account?.grokUsage
+  if (!usage) {
+    return []
+  }
+  const formatWindow = (window, suffix) => {
+    if (!window || window.used === null || window.used === undefined || !window.limit) {
+      return { value: '-', subtitle: '等待上游配额头' }
+    }
+    return {
+      value: `${formatNumber(window.used)} / ${formatNumber(window.limit)}`,
+      subtitle: window.utilization !== null ? `已用 ${window.utilization}% ${suffix}` : suffix
+    }
+  }
+  const tokens = formatWindow(usage.tokens, 'tokens')
+  const requests = formatWindow(usage.requests, 'requests')
+  return [
+    { key: 'tokens', label: 'Token 窗口', ...tokens },
+    { key: 'requests', label: '请求窗口', ...requests }
+  ]
+})
 
 const rollingWindows = computed(() => {
   const rolling = rollingUsageData.value

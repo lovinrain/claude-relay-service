@@ -11,6 +11,7 @@ const {
   logRefreshSkipped
 } = require('../../utils/tokenRefreshLogger')
 const grokHelper = require('../../utils/grokHelper')
+const grokQuota = require('../../utils/grokQuota')
 
 class GrokAccountService {
   constructor() {
@@ -112,6 +113,10 @@ class GrokAccountService {
 
     const accountId = uuidv4()
     const now = new Date().toISOString()
+    const subscriptionTier =
+      grokQuota.subscriptionTierFromJWT(accessToken) ||
+      grokQuota.normalizeSubscriptionTier(options.subscriptionTier) ||
+      ''
     const accountData = {
       id: accountId,
       platform: 'grok',
@@ -133,6 +138,7 @@ class GrokAccountService {
       accountType,
       schedulable: schedulable ? 'true' : 'false',
       subscriptionExpiresAt: options.subscriptionExpiresAt || null,
+      subscriptionTier,
       createdAt: now,
       updatedAt: now,
       lastUsedAt: '',
@@ -179,6 +185,7 @@ class GrokAccountService {
     accountData.authType = this._normalizeAuthType(accountData.authType)
     accountData.customUpstream = isTruthy(accountData.customUpstream)
     accountData.platform = accountData.platform || 'grok'
+    await this._hydrateSubscriptionTier(accountData)
 
     if (!includeSecrets) {
       return this._sanitizeAccount(accountData, { includeSecrets: false })
@@ -218,6 +225,9 @@ class GrokAccountService {
         }
       }
 
+      accountData.accessToken = this._decrypt(accountData.accessToken)
+      this._hydrateSubscriptionTier(accountData, { persist: true }).catch(() => {})
+
       const sanitized = this._sanitizeAccount(accountData, { includeSecrets: false })
       const rateLimitInfo = this._getRateLimitInfo(accountData)
       sanitized.rateLimitStatus = rateLimitInfo.isRateLimited
@@ -235,6 +245,8 @@ class GrokAccountService {
       sanitized.isActive = accountData.isActive === 'true'
       sanitized.expiresAt = accountData.subscriptionExpiresAt || accountData.expiresAt || null
       sanitized.platform = 'grok'
+      sanitized.subscriptionTier = grokQuota.normalizeSubscriptionTier(accountData.subscriptionTier)
+      sanitized.grokUsage = grokQuota.buildGrokUsageSnapshot(accountData)
       accounts.push(sanitized)
     })
 
@@ -381,6 +393,7 @@ class GrokAccountService {
 
       logRefreshStart(accountId, account.name, 'grok')
       const tokens = await grokHelper.refreshAccessToken(account.refreshToken, account.proxy)
+      const subscriptionTier = grokQuota.subscriptionTierFromJWT(tokens.accessToken)
       const updates = {
         accessToken: tokens.accessToken,
         expiresAt: tokens.expiresAt,
@@ -388,6 +401,9 @@ class GrokAccountService {
         lastRefreshAt: new Date().toISOString(),
         status: 'active',
         errorMessage: ''
+      }
+      if (subscriptionTier) {
+        updates.subscriptionTier = subscriptionTier
       }
       if (tokens.refreshToken && tokens.refreshToken !== account.refreshToken) {
         updates.refreshToken = tokens.refreshToken
@@ -534,6 +550,61 @@ class GrokAccountService {
     }
   }
 
+  async _hydrateSubscriptionTier(accountData, { persist = true } = {}) {
+    if (!accountData?.id || grokQuota.normalizeSubscriptionTier(accountData.subscriptionTier)) {
+      return accountData
+    }
+    const token = accountData.accessToken
+    if (!token) {
+      return accountData
+    }
+    const tier = grokQuota.subscriptionTierFromJWT(token)
+    if (!tier) {
+      return accountData
+    }
+    accountData.subscriptionTier = tier
+    if (persist) {
+      try {
+        const client = redis.getClientSafe()
+        await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountData.id}`, 'subscriptionTier', tier)
+      } catch (error) {
+        logger.debug(
+          `Failed to persist Grok subscription tier for ${accountData.id}: ${error.message}`
+        )
+      }
+    }
+    return accountData
+  }
+
+  async recordQuotaObservation(accountId, headers, { statusCode = 0, model = '' } = {}) {
+    const account = await this.getAccount(accountId)
+    if (!account) {
+      return null
+    }
+    const next = grokQuota.parseQuotaHeaders(headers, { statusCode, model })
+    if (!next) {
+      return grokQuota.buildGrokUsageSnapshot(account)
+    }
+    const previous = grokQuota.parseStoredSnapshot(account.grokQuotaSnapshot)
+    const merged = grokQuota.mergeQuotaSnapshots(previous, next)
+    const subscriptionTier = grokQuota.canonicalPlan({
+      subscriptionTier: account.subscriptionTier,
+      snapshot: merged
+    })
+    const updates = {
+      grokQuotaSnapshot: JSON.stringify(merged)
+    }
+    if (subscriptionTier) {
+      updates.subscriptionTier = subscriptionTier
+    }
+    await this.updateAccount(accountId, updates)
+    return grokQuota.buildGrokUsageSnapshot({
+      ...account,
+      ...updates,
+      grokQuotaSnapshot: updates.grokQuotaSnapshot
+    })
+  }
+
   isSubscriptionExpired(account) {
     if (!account?.subscriptionExpiresAt) {
       return false
@@ -575,7 +646,9 @@ class GrokAccountService {
           ? '***'
           : '',
       email: includeSecrets ? accountData.email : accountData.email ? '***' : '',
-      platform: 'grok'
+      platform: 'grok',
+      subscriptionTier: grokQuota.normalizeSubscriptionTier(accountData.subscriptionTier),
+      grokUsage: grokQuota.buildGrokUsageSnapshot(accountData)
     }
   }
 

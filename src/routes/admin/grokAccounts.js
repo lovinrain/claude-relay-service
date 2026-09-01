@@ -453,6 +453,21 @@ router.post('/grok-accounts/:accountId/test', authenticateAdmin, async (req, res
     }
 
     const response = await axios.post(apiUrl, payload, requestConfig)
+    grokAccountService
+      .recordQuotaObservation(accountId, response.headers, {
+        statusCode: response.status,
+        model
+      })
+      .catch(() => {})
+    if (response.status >= 400) {
+      const latency = Date.now() - startTime
+      return res.status(response.status).json({
+        success: false,
+        error: 'Test failed',
+        message: extractErrorMessage(response.data, `HTTP ${response.status}`),
+        latency
+      })
+    }
     const latency = Date.now() - startTime
     let responseText = ''
     const output = response.data?.output
@@ -479,9 +494,17 @@ router.post('/grok-accounts/:accountId/test', authenticateAdmin, async (req, res
       }
     })
   } catch (error) {
+    if (error.response?.headers) {
+      grokAccountService
+        .recordQuotaObservation(accountId, error.response.headers, {
+          statusCode: error.response.status,
+          model
+        })
+        .catch(() => {})
+    }
     const latency = Date.now() - startTime
     logger.error(`❌ Grok account test failed: ${accountId}`, error.message)
-    return res.status(500).json({
+    return res.status(error.response?.status || 500).json({
       success: false,
       error: 'Test failed',
       message: extractErrorMessage(error.response?.data, error.message),

@@ -387,8 +387,9 @@
                               Grok
                             </div>
                             <div class="text-gray-200 dark:text-gray-600">
-                              自定义中转没有官方会话额度窗口。这里展示本地滚动用量（费用 / tokens /
-                              请求次数），不是上游配额进度。
+                              OAuth 订阅显示 xAI 配额窗口（tokens / requests）和套餐名（如 SuperGrok
+                              Heavy）。自定义中转没有官方会话额度，下面的 5h / 1d / 7d / 30d 是 CRS
+                              本地滚动用量。
                             </div>
                             <div class="space-y-1 text-gray-200 dark:text-gray-600">
                               <div class="flex items-start gap-2">
@@ -1261,6 +1262,59 @@
                   </div>
                   <div v-else-if="account.platform === 'grok'" class="space-y-1.5">
                     <div
+                      v-if="account.authType === 'oauth' && account.grokUsage"
+                      class="space-y-1.5"
+                    >
+                      <div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
+                        {{ account.grokUsage.planLabel || 'Grok OAuth' }}
+                        <span
+                          v-if="!account.grokUsage.headersObserved"
+                          class="ml-1 font-normal text-gray-400"
+                          >（配额需一次成功请求后显示）</span
+                        >
+                      </div>
+                      <div
+                        v-for="window in grokQuotaWindows(account)"
+                        :key="window.key"
+                        class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70"
+                      >
+                        <div class="flex items-center gap-2">
+                          <span
+                            class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                          >
+                            {{ window.label }}
+                          </span>
+                          <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                              <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                                <div
+                                  :class="[
+                                    'h-2 rounded-full transition-all duration-300',
+                                    getClaudeUsageBarClass(window)
+                                  ]"
+                                  :style="{ width: getClaudeUsageWidth(window) }"
+                                />
+                              </div>
+                              <span
+                                class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                              >
+                                {{ formatClaudeUsagePercent(window) }}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          <span v-if="window.used !== null && window.limit">
+                            {{ formatNumber(window.used) }} / {{ formatNumber(window.limit) }}
+                          </span>
+                          <span v-if="window.remainingSeconds !== null" class="ml-1">
+                            重置剩余 {{ formatClaudeRemaining(window) }}
+                          </span>
+                          <span v-if="window.used === null && !window.limit">等待上游配额头</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div
                       v-for="window in grokRollingWindows"
                       :key="window.key"
                       class="rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700/70"
@@ -1892,6 +1946,56 @@
               <div v-if="!account.codexUsage" class="text-xs text-gray-400">暂无统计</div>
             </div>
             <div v-else-if="account.platform === 'grok'" class="space-y-1.5">
+              <div v-if="account.authType === 'oauth' && account.grokUsage" class="space-y-1.5">
+                <div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
+                  {{ account.grokUsage.planLabel || 'Grok OAuth' }}
+                  <span
+                    v-if="!account.grokUsage.headersObserved"
+                    class="ml-1 font-normal text-gray-400"
+                    >（配额需一次成功请求后显示）</span
+                  >
+                </div>
+                <div
+                  v-for="window in grokQuotaWindows(account)"
+                  :key="window.key"
+                  class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700"
+                >
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex min-w-[32px] justify-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
+                    >
+                      {{ window.label }}
+                    </span>
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 flex-1 rounded-full bg-gray-200 dark:bg-gray-600">
+                          <div
+                            :class="[
+                              'h-2 rounded-full transition-all duration-300',
+                              getClaudeUsageBarClass(window)
+                            ]"
+                            :style="{ width: getClaudeUsageWidth(window) }"
+                          />
+                        </div>
+                        <span
+                          class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
+                        >
+                          {{ formatClaudeUsagePercent(window) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    <span v-if="window.used !== null && window.limit">
+                      {{ formatNumber(window.used) }} / {{ formatNumber(window.limit) }}
+                    </span>
+                    <span v-if="window.remainingSeconds !== null" class="ml-1">
+                      重置剩余 {{ formatClaudeRemaining(window) }}
+                    </span>
+                    <span v-if="window.used === null && !window.limit">等待上游配额头</span>
+                  </div>
+                </div>
+              </div>
               <div
                 v-for="window in grokRollingWindows"
                 :key="window.key"
@@ -5098,6 +5202,17 @@ const grokRollingWindows = [
   { key: 'sevenDay', label: '7d' },
   { key: 'thirtyDay', label: '30d' }
 ]
+
+const grokQuotaWindows = (account) => {
+  const usage = account?.grokUsage
+  if (!usage) {
+    return []
+  }
+  return [
+    { key: 'tokens', label: 'tokens', ...(usage.tokens || {}) },
+    { key: 'requests', label: 'req', ...(usage.requests || {}) }
+  ]
+}
 
 // 格式化剩余时间
 const formatCodexRemaining = (usageItem) => {
