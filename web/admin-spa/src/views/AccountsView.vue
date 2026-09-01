@@ -1314,22 +1314,34 @@
                         </div>
                       </div>
                     </div>
-                    <div
-                      class="grid grid-cols-2 gap-x-2 gap-y-0.5 rounded-lg bg-gray-50 px-2 py-1.5 text-[11px] dark:bg-gray-700/70"
-                    >
+                    <div class="space-y-1 rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700/70">
                       <div
                         v-for="window in grokRollingWindows"
                         :key="window.key"
-                        class="flex min-w-0 items-baseline justify-between gap-1"
+                        class="flex items-center gap-1.5"
+                        :title="formatGrokRollingTooltip(account.rollingUsage?.[window.key])"
                       >
-                        <span class="font-medium text-zinc-600 dark:text-zinc-300">{{
-                          window.label
-                        }}</span>
                         <span
-                          class="truncate tabular-nums text-gray-800 dark:text-gray-100"
-                          :title="formatGrokRollingLine(account.rollingUsage?.[window.key])"
+                          class="w-6 shrink-0 text-[10px] font-semibold text-zinc-500 dark:text-zinc-300"
+                          >{{ window.label }}</span
                         >
-                          {{ formatGrokRollingLine(account.rollingUsage?.[window.key]) }}
+                        <div
+                          class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-600"
+                        >
+                          <div
+                            class="h-full rounded-full bg-gradient-to-r from-zinc-500 to-indigo-500 transition-all duration-300"
+                            :style="{
+                              width: grokRollingBarWidth(
+                                account.rollingUsage?.[window.key],
+                                grokRollingMaxCost(account.rollingUsage)
+                              )
+                            }"
+                          />
+                        </div>
+                        <span
+                          class="w-[52px] shrink-0 text-right text-[10px] font-semibold tabular-nums text-gray-800 dark:text-gray-100"
+                        >
+                          ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
                         </span>
                       </div>
                     </div>
@@ -1988,22 +2000,34 @@
                   </div>
                 </div>
               </div>
-              <div
-                class="grid grid-cols-2 gap-x-2 gap-y-0.5 rounded-lg bg-gray-50 px-2 py-1.5 text-[11px] dark:bg-gray-700"
-              >
+              <div class="space-y-1 rounded-lg bg-gray-50 px-2 py-1.5 dark:bg-gray-700">
                 <div
                   v-for="window in grokRollingWindows"
                   :key="window.key"
-                  class="flex min-w-0 items-baseline justify-between gap-1"
+                  class="flex items-center gap-1.5"
+                  :title="formatGrokRollingTooltip(account.rollingUsage?.[window.key])"
                 >
-                  <span class="font-medium text-zinc-600 dark:text-zinc-300">{{
-                    window.label
-                  }}</span>
                   <span
-                    class="truncate tabular-nums text-gray-800 dark:text-gray-100"
-                    :title="formatGrokRollingLine(account.rollingUsage?.[window.key])"
+                    class="w-6 shrink-0 text-[10px] font-semibold text-zinc-500 dark:text-zinc-300"
+                    >{{ window.label }}</span
                   >
-                    {{ formatGrokRollingLine(account.rollingUsage?.[window.key]) }}
+                  <div
+                    class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-600"
+                  >
+                    <div
+                      class="h-full rounded-full bg-gradient-to-r from-zinc-500 to-indigo-500 transition-all duration-300"
+                      :style="{
+                        width: grokRollingBarWidth(
+                          account.rollingUsage?.[window.key],
+                          grokRollingMaxCost(account.rollingUsage)
+                        )
+                      }"
+                    />
+                  </div>
+                  <span
+                    class="w-[52px] shrink-0 text-right text-[10px] font-semibold tabular-nums text-gray-800 dark:text-gray-100"
+                  >
+                    ${{ formatCost(account.rollingUsage?.[window.key]?.cost || 0) }}
                   </span>
                 </div>
               </div>
@@ -5187,11 +5211,22 @@ const grokRollingWindows = [
   { key: 'thirtyDay', label: '30d' }
 ]
 
-const formatGrokRollingLine = (usage) => {
+const grokRollingMaxCost = (rolling) =>
+  Math.max(...grokRollingWindows.map((window) => Number(rolling?.[window.key]?.cost || 0)), 0)
+
+const grokRollingBarWidth = (usage, maxCost) => {
+  const cost = Number(usage?.cost || 0)
+  if (!maxCost || cost <= 0) {
+    return '0%'
+  }
+  return `${Math.max(6, Math.min(100, (cost / maxCost) * 100))}%`
+}
+
+const formatGrokRollingTooltip = (usage) => {
   const cost = formatCost(usage?.cost || 0)
   const tokens = formatNumber(usage?.tokens || 0)
   const requests = usage?.requests || 0
-  return `$${cost} · ${tokens}/${requests}`
+  return `$${cost} · ${tokens} tokens · ${requests} 次`
 }
 
 const grokQuotaWindows = (account) => {
