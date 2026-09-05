@@ -407,7 +407,8 @@
                               <div class="flex items-start gap-2">
                                 <i class="fas fa-gem mt-[2px] text-[10px] text-purple-500"></i>
                                 <span class="font-medium text-white dark:text-gray-900"
-                                  >Sonnet窗口：7天Sonnet模型专用限额。</span
+                                  >模型窗口：上游按模型限定的 7 天专用限额（如
+                                  Fable），标签取自上游返回的模型名，没有则不显示。</span
                                 >
                               </div>
                               <div class="flex items-start gap-2">
@@ -951,13 +952,17 @@
                           重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                         </div>
                       </div>
-                      <!-- 7天Opus窗口 -->
-                      <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                      <!-- 按模型限定的周窗口（上游 limits[] 中的 weekly_scoped，如 Fable） -->
+                      <div
+                        v-for="scoped in getScopedModelUsage(account)"
+                        :key="scoped.modelName"
+                        class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70"
+                      >
                         <div class="flex items-center gap-2">
                           <span
                             class="inline-flex min-w-[32px] justify-center rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-600 dark:bg-purple-500/20 dark:text-purple-300"
                           >
-                            sonnet
+                            {{ scoped.modelName }}
                           </span>
                           <div class="flex-1">
                             <div class="flex items-center gap-2">
@@ -965,23 +970,21 @@
                                 <div
                                   :class="[
                                     'h-2 rounded-full transition-all duration-300',
-                                    getClaudeUsageBarClass(account.claudeUsage.sevenDayOpus)
+                                    getClaudeUsageBarClass(scoped)
                                   ]"
-                                  :style="{
-                                    width: getClaudeUsageWidth(account.claudeUsage.sevenDayOpus)
-                                  }"
+                                  :style="{ width: getClaudeUsageWidth(scoped) }"
                                 />
                               </div>
                               <span
                                 class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
                               >
-                                {{ formatClaudeUsagePercent(account.claudeUsage.sevenDayOpus) }}
+                                {{ formatClaudeUsagePercent(scoped) }}
                               </span>
                             </div>
                           </div>
                         </div>
                         <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                          重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                          重置剩余 {{ formatClaudeRemaining(scoped) }}
                         </div>
                       </div>
                     </div>
@@ -1651,13 +1654,17 @@
                     重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDay) }}
                   </div>
                 </div>
-                <!-- 7天Opus窗口 -->
-                <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70">
+                <!-- 按模型限定的周窗口（上游 limits[] 中的 weekly_scoped，如 Fable） -->
+                <div
+                  v-for="scoped in getScopedModelUsage(account)"
+                  :key="scoped.modelName"
+                  class="rounded-lg bg-gray-50 p-2 dark:bg-gray-700/70"
+                >
                   <div class="flex items-center gap-2">
                     <span
                       class="inline-flex min-w-[32px] justify-center rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-600 dark:bg-purple-500/20 dark:text-purple-300"
                     >
-                      Opus
+                      {{ scoped.modelName }}
                     </span>
                     <div class="flex-1">
                       <div class="flex items-center gap-2">
@@ -1665,23 +1672,21 @@
                           <div
                             :class="[
                               'h-2 rounded-full transition-all duration-300',
-                              getClaudeUsageBarClass(account.claudeUsage.sevenDayOpus)
+                              getClaudeUsageBarClass(scoped)
                             ]"
-                            :style="{
-                              width: getClaudeUsageWidth(account.claudeUsage.sevenDayOpus)
-                            }"
+                            :style="{ width: getClaudeUsageWidth(scoped) }"
                           />
                         </div>
                         <span
                           class="w-12 text-right text-xs font-semibold text-gray-800 dark:text-gray-100"
                         >
-                          {{ formatClaudeUsagePercent(account.claudeUsage.sevenDayOpus) }}
+                          {{ formatClaudeUsagePercent(scoped) }}
                         </span>
                       </div>
                     </div>
                   </div>
                   <div class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    重置剩余 {{ formatClaudeRemaining(account.claudeUsage.sevenDayOpus) }}
+                    重置剩余 {{ formatClaudeRemaining(scoped) }}
                   </div>
                 </div>
               </div>
@@ -3739,11 +3744,13 @@ const formatRemainingTime = (minutes) => {
 }
 
 // 格式化限流时间（支持显示天数）
-// 参与「按模型独立限流」的家族及其展示名。
-// 顺序即徽章展示顺序，与后端 RATE_LIMITED_MODEL_FAMILIES 保持一致。
+// 需要在账号列表上展示徽章的模型家族，顺序即展示顺序。
+// 后端 RATE_LIMITED_MODEL_FAMILIES 还包含 sonnet，但这里刻意不展示：
+// sonnet 是默认主力模型，限流触发频繁且几乎所有账号都会周期性命中，
+// 徽章会一直亮着，反而把 Opus / Fable 这类真正影响路由判断的信号淹没。
+// sonnet 的限流状态仍然在 modelRateLimitStatus 里，调度行为不受影响。
 const MODEL_RATE_LIMIT_FAMILIES = [
   { key: 'opus', label: 'Opus' },
-  { key: 'sonnet', label: 'Sonnet' },
   { key: 'haiku', label: 'Haiku' },
   { key: 'fable', label: 'Fable' }
 ]
@@ -3769,6 +3776,16 @@ const getLimitedModelFamilies = (account) => {
 
     return { key, label, minutesRemaining, resetAt: status.resetAt || null }
   }).filter(Boolean)
+}
+
+// 上游按模型限定的周窗口（limits[] 里的 weekly_scoped），标签用上游给的
+// display_name，有几个就显示几条；上游没回传就不显示。
+const getScopedModelUsage = (account) => {
+  const scoped = account?.claudeUsage?.sevenDayScopedModels
+  if (!Array.isArray(scoped)) {
+    return []
+  }
+  return scoped.filter((item) => item?.modelName && item.utilization !== null)
 }
 
 const formatRateLimitTime = (minutes) => {
