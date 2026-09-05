@@ -795,20 +795,14 @@
                       </el-tooltip>
                     </span>
                     <span
-                      v-if="
-                        account.opusRateLimitStatus && account.opusRateLimitStatus.isRateLimited
-                      "
+                      v-for="family in getLimitedModelFamilies(account)"
+                      :key="family.key"
                       class="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-800"
                     >
                       <i class="fas fa-hourglass-half mr-1" />
-                      Opus限流
-                      <span
-                        v-if="
-                          Number.isFinite(account.opusRateLimitStatus.minutesRemaining) &&
-                          account.opusRateLimitStatus.minutesRemaining > 0
-                        "
-                      >
-                        ({{ formatRateLimitTime(account.opusRateLimitStatus.minutesRemaining) }})
+                      {{ family.label }}限流
+                      <span v-if="family.minutesRemaining > 0">
+                        ({{ formatRateLimitTime(family.minutesRemaining) }})
                       </span>
                     </span>
                     <span
@@ -3745,6 +3739,38 @@ const formatRemainingTime = (minutes) => {
 }
 
 // 格式化限流时间（支持显示天数）
+// 参与「按模型独立限流」的家族及其展示名。
+// 顺序即徽章展示顺序，与后端 RATE_LIMITED_MODEL_FAMILIES 保持一致。
+const MODEL_RATE_LIMIT_FAMILIES = [
+  { key: 'opus', label: 'Opus' },
+  { key: 'sonnet', label: 'Sonnet' },
+  { key: 'haiku', label: 'Haiku' },
+  { key: 'fable', label: 'Fable' }
+]
+
+// 取出账号上所有处于限流中的模型家族。
+// 后端 /admin/claude-accounts 返回 modelRateLimitStatus（含全部家族）；
+// 同时兼容只有 opusRateLimitStatus / fableRateLimitStatus 的旧数据。
+const getLimitedModelFamilies = (account) => {
+  if (!account) return []
+
+  const legacy = {
+    opus: account.opusRateLimitStatus,
+    fable: account.fableRateLimitStatus
+  }
+
+  return MODEL_RATE_LIMIT_FAMILIES.map(({ key, label }) => {
+    const status = account.modelRateLimitStatus?.[key] || legacy[key]
+    if (!status?.isRateLimited) return null
+
+    const minutesRemaining = Number.isFinite(status.minutesRemaining)
+      ? Math.max(0, Math.ceil(status.minutesRemaining))
+      : 0
+
+    return { key, label, minutesRemaining, resetAt: status.resetAt || null }
+  }).filter(Boolean)
+}
+
 const formatRateLimitTime = (minutes) => {
   if (!minutes || minutes <= 0) return ''
 
@@ -4560,7 +4586,7 @@ const isAccountRoutingBlocked = (account) => {
     return true
   }
 
-  if (account.opusRateLimitStatus?.isRateLimited) {
+  if (getLimitedModelFamilies(account).length > 0) {
     return true
   }
 
@@ -4638,14 +4664,11 @@ const getRoutingBlockReasons = (account) => {
     reasons.push(tempReason)
   }
 
-  if (account.opusRateLimitStatus?.isRateLimited) {
-    const opusMinutes = Number.isFinite(account.opusRateLimitStatus.minutesRemaining)
-      ? Math.max(0, Math.ceil(account.opusRateLimitStatus.minutesRemaining))
-      : 0
+  for (const family of getLimitedModelFamilies(account)) {
     reasons.push(
-      opusMinutes > 0
-        ? `Opus 模型限流中（约 ${formatRateLimitTime(opusMinutes)} 后恢复）`
-        : 'Opus 模型限流中'
+      family.minutesRemaining > 0
+        ? `${family.label} 模型限流中（约 ${formatRateLimitTime(family.minutesRemaining)} 后恢复）`
+        : `${family.label} 模型限流中`
     )
   }
 
