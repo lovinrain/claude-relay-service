@@ -206,25 +206,87 @@ describe('grokHelper upstream modes', () => {
     })
   })
 
-  describe('CLI chat completions rewrite', () => {
-    it('maps Chat Completions bodies onto Responses input for the CLI proxy', () => {
-      const converted = grokHelper.chatCompletionsToResponsesBody({
-        model: 'grok-4.5',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 32,
-        stream: false
-      })
-      expect(converted.messages).toBeUndefined()
-      expect(converted.max_tokens).toBeUndefined()
-      expect(converted.input).toEqual([{ role: 'user', content: 'hi' }])
-      expect(converted.max_output_tokens).toBe(32)
-      expect(grokHelper.toResponsesPath('/v1/chat/completions')).toBe('/v1/responses')
-      expect(grokHelper.toResponsesPath('/chat/completions')).toBe('/responses')
+  describe('Chat Completions body normalization', () => {
+    it('keeps Chat Completions tools and messages untouched (no Responses rewrite)', () => {
+      const tools = [
+        {
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get weather',
+            parameters: { type: 'object', properties: { city: { type: 'string' } } }
+          }
+        }
+      ]
+      const messages = [
+        { role: 'system', content: 'Be terse.' },
+        { role: 'user', content: 'Weather in Paris?' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{}' } }
+          ]
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: 'sunny' }
+      ]
+      const body = { model: 'grok-4.6', messages, tools, tool_choice: 'auto', stream: false }
+      const normalized = grokHelper.normalizeChatCompletionsBody(body)
+      expect(normalized.tools).toBe(tools)
+      expect(normalized.messages).toBe(messages)
+      expect(normalized.tool_choice).toBe('auto')
+      expect(normalized.input).toBeUndefined()
+      expect(normalized.max_output_tokens).toBeUndefined()
+      expect(normalized.stream_options).toBeUndefined()
+      expect(body.stream_options).toBeUndefined()
     })
 
-    it('leaves an already-Responses body unchanged', () => {
-      const body = { model: 'grok-4.5', input: [{ role: 'user', content: 'hi' }] }
-      expect(grokHelper.chatCompletionsToResponsesBody(body).input).toBe(body.input)
+    it('forces stream usage on streaming requests without clobbering other options', () => {
+      const normalized = grokHelper.normalizeChatCompletionsBody({
+        model: 'grok-4.6',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: true,
+        stream_options: { foo: 'bar' }
+      })
+      expect(normalized.stream_options).toEqual({ foo: 'bar', include_usage: true })
+      expect(
+        grokHelper.normalizeChatCompletionsBody({ model: 'grok-4.6', stream: true }).stream_options
+      ).toEqual({ include_usage: true })
+    })
+
+    it('drops the Responses-only prompt_cache_key', () => {
+      const normalized = grokHelper.normalizeChatCompletionsBody({
+        model: 'grok-4.6',
+        prompt_cache_key: 'abc',
+        messages: []
+      })
+      expect(normalized.prompt_cache_key).toBeUndefined()
+    })
+
+    it('normalizes reasoning_effort like Sub2API', () => {
+      const effort = (model, value, key = 'reasoning_effort') =>
+        grokHelper.normalizeChatCompletionsBody({ model, [key]: value }).reasoning_effort
+
+      expect(effort('grok-4.6', 'minimal')).toBe('low')
+      expect(effort('grok-4.6', 'max')).toBe('high')
+      expect(effort('grok-4.6', 'x-high')).toBe('xhigh')
+      expect(effort('grok-4.5', 'xhigh')).toBe('high')
+      expect(effort('xai/grok-4.6', 'Medium')).toBe('medium')
+      expect(effort('grok-4.6', 'bogus')).toBeUndefined()
+      expect(effort('grok-4.6', null)).toBeUndefined()
+      expect(effort('grok-4', 'high')).toBeUndefined()
+      expect(effort('grok-4.6', 'high', 'reasoningEffort')).toBe('high')
+      expect(
+        grokHelper.normalizeChatCompletionsBody({ model: 'grok-4.6', reasoningEffort: 'high' })
+          .reasoningEffort
+      ).toBeUndefined()
+    })
+
+    it('returns non-object bodies unchanged', () => {
+      expect(grokHelper.normalizeChatCompletionsBody(null)).toBeNull()
+      expect(grokHelper.normalizeChatCompletionsBody('raw')).toBe('raw')
+      const arr = []
+      expect(grokHelper.normalizeChatCompletionsBody(arr)).toBe(arr)
     })
   })
 })

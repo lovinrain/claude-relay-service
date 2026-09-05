@@ -7,6 +7,11 @@
  *   (3) Custom relay        -> operator-set OpenAI-shaped base URL + API key
  *
  * OAuth authorization and token refresh always stay on official auth.x.ai.
+ *
+ * All three upstreams speak OpenAI Chat Completions (cli-chat-proxy exposes
+ * both /v1/chat/completions and /v1/responses), so client requests are
+ * forwarded on their original path. Mirroring Sub2API's raw Chat Completions
+ * path, only xAI-specific field hygiene is applied before forwarding.
  */
 
 const crypto = require('crypto')
@@ -374,40 +379,114 @@ function isChatCompletionsPath(requestPath) {
   return path === '/chat/completions' || path === '/v1/chat/completions'
 }
 
-function toResponsesPath(requestPath) {
-  const path = String(requestPath || '')
-  if (path.startsWith('/v1/')) {
-    return '/v1/responses'
+// Models that accept reasoning_effort on Chat Completions (Sub2API
+// grokSupportsReasoningEffort). Others reject or ignore the field, so it is
+// dropped rather than forwarded.
+const REASONING_EFFORT_MODELS = new Set([
+  'grok-4.5',
+  'grok-4.5-latest',
+  'grok-4.6',
+  'grok-4.6-latest',
+  'grok-4.3',
+  'grok-4.3-latest',
+  'grok-3-mini',
+  'grok-3-mini-fast',
+  'grok-4.20-0309-reasoning',
+  'grok-4.20-reasoning',
+  'grok-4.20-multi-agent-0309'
+])
+const XHIGH_REASONING_EFFORT_MODELS = new Set(['grok-4.6', 'grok-4.6-latest'])
+
+function stripGrokProviderPrefix(model) {
+  const trimmed = String(model || '').trim()
+  const lower = trimmed.toLowerCase()
+  for (const prefix of ['xai/', 'x-ai/', 'grok/']) {
+    if (lower.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).trim()
+    }
   }
-  return '/responses'
+  return trimmed
 }
 
-function chatCompletionsToResponsesBody(body) {
+function normalizeGrokModelName(model) {
+  return stripGrokProviderPrefix(model).toLowerCase()
+}
+
+function supportsReasoningEffort(model) {
+  return REASONING_EFFORT_MODELS.has(normalizeGrokModelName(model))
+}
+
+function supportsXHighReasoningEffort(model) {
+  return XHIGH_REASONING_EFFORT_MODELS.has(normalizeGrokModelName(model))
+}
+
+// Maps client reasoning_effort spellings onto the values xAI accepts.
+// Returns '' when the value is unknown (the field is then dropped).
+function normalizeReasoningEffortValue(raw, model) {
+  const value = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-_\s]/g, '')
+  switch (value) {
+    case 'none':
+    case 'low':
+    case 'medium':
+    case 'high':
+      return value
+    case 'minimal':
+      return 'low'
+    case 'xhigh':
+    case 'extrahigh':
+      return supportsXHighReasoningEffort(model) ? 'xhigh' : 'high'
+    case 'max':
+    case 'ultra':
+      return 'high'
+    default:
+      return ''
+  }
+}
+
+/**
+ * Prepare a Chat Completions body for xAI without changing its protocol.
+ * Port of Sub2API's raw Chat Completions path (forwardAsRawChatCompletions):
+ *   - prompt_cache_key is Responses-only and is removed
+ *   - reasoning_effort (or camelCase reasoningEffort) is normalized, and
+ *     dropped for models that do not accept it
+ *   - streaming requests force stream_options.include_usage so the final
+ *     chunk carries usage for accounting (and downstream clients)
+ * messages, tools, tool_choice and tool_calls are forwarded untouched: the
+ * upstream deserializes the Chat Completions shapes natively.
+ */
+function normalizeChatCompletionsBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return body
   }
-  if (body.input !== undefined) {
-    return body
+  const normalized = { ...body }
+
+  delete normalized.prompt_cache_key
+
+  const rawEffort =
+    typeof normalized.reasoning_effort === 'string' && normalized.reasoning_effort.trim()
+      ? normalized.reasoning_effort
+      : normalized.reasoningEffort
+  delete normalized.reasoning_effort
+  delete normalized.reasoningEffort
+  const effort = normalizeReasoningEffortValue(rawEffort, normalized.model)
+  if (effort && supportsReasoningEffort(normalized.model)) {
+    normalized.reasoning_effort = effort
   }
 
-  const converted = { ...body }
-  if (Array.isArray(body.messages)) {
-    converted.input = body.messages.map((message) => {
-      if (!message || typeof message !== 'object') {
-        return message
-      }
-      return {
-        role: message.role,
-        content: message.content
-      }
-    })
-    delete converted.messages
+  if (normalized.stream === true) {
+    const options =
+      normalized.stream_options &&
+      typeof normalized.stream_options === 'object' &&
+      !Array.isArray(normalized.stream_options)
+        ? normalized.stream_options
+        : {}
+    normalized.stream_options = { ...options, include_usage: true }
   }
-  if (converted.max_tokens !== undefined && converted.max_output_tokens === undefined) {
-    converted.max_output_tokens = converted.max_tokens
-    delete converted.max_tokens
-  }
-  return converted
+
+  return normalized
 }
 
 function joinBaseAndPath(baseUrl, requestPath) {
@@ -764,8 +843,11 @@ module.exports = {
   isOfficialBaseURLHost,
   joinBaseAndPath,
   isChatCompletionsPath,
-  toResponsesPath,
-  chatCompletionsToResponsesBody,
+  normalizeChatCompletionsBody,
+  normalizeReasoningEffortValue,
+  supportsReasoningEffort,
+  supportsXHighReasoningEffort,
+  stripGrokProviderPrefix,
   applyCLIProxyHeaders,
   shouldApplyCLIProxyHeaders,
   resolveCLIVersion,

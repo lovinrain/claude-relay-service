@@ -77,16 +77,13 @@ class GrokRelayService {
         baseUrl: fullAccount.baseUrl,
         customUpstream: fullAccount.customUpstream
       })
-      let requestPath = req.path
+      const requestPath = req.path
       let requestBody = req.body
-      // Grok CLI proxy speaks Responses, not Chat Completions. Official API and
-      // custom relays keep the client path so OpenAI-shaped third parties work.
-      if (
-        grokHelper.shouldApplyCLIProxyHeaders(baseUrl) &&
-        grokHelper.isChatCompletionsPath(requestPath)
-      ) {
-        requestPath = grokHelper.toResponsesPath(requestPath)
-        requestBody = grokHelper.chatCompletionsToResponsesBody(requestBody)
+      // Every upstream mode (cli-chat-proxy included) serves Chat Completions
+      // natively, so the client path and protocol are kept. Only xAI field
+      // hygiene is applied, as in Sub2API's raw Chat Completions path.
+      if (grokHelper.isChatCompletionsPath(requestPath)) {
+        requestBody = grokHelper.normalizeChatCompletionsBody(requestBody)
       }
       const targetUrl = grokHelper.joinBaseAndPath(baseUrl, requestPath)
       logger.info(`🎯 Forwarding Grok request to: ${targetUrl}`)
