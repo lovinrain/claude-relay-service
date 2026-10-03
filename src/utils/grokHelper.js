@@ -15,6 +15,7 @@
  */
 
 const crypto = require('crypto')
+const os = require('os')
 const axios = require('axios')
 const logger = require('./logger')
 const ProxyHelper = require('./proxyHelper')
@@ -36,9 +37,13 @@ const REGIONAL_BASE_URLS = {
 
 const CLI_PROXY_HOST = 'cli-chat-proxy.grok.com'
 const CLI_TOKEN_AUTH = 'xai-grok-cli'
-const CLI_CLIENT_IDENTIFIER = 'grok-shell'
-const CLI_CLIENT_VERSION = '0.2.120'
-const CLI_STABLE_VERSION = '0.2.93'
+// cli-chat-proxy returns 426 for x-grok-client-version below 1.0.13.
+// 1.0.46 is the current stable CLI pin published at https://x.ai/cli/stable.
+const CLI_CLIENT_IDENTIFIER = 'grok-pager'
+const CLI_CLIENT_MODE = 'interactive'
+const CLI_AUTHENTICATE_RESPONSE = 'authenticate-response'
+const CLI_CLIENT_VERSION = '1.0.46'
+const CLI_STABLE_VERSION = '1.0.13'
 const CLI_VERSION_ENV = 'XAI_GROK_CLI_VERSION'
 
 const OAUTH_ALLOWED_HOSTS = ['x.ai', '*.x.ai']
@@ -527,8 +532,15 @@ function resolveCLIVersion() {
   return CLI_CLIENT_VERSION
 }
 
+function cliPlatformLabel() {
+  const platform = os.platform() === 'darwin' ? 'macos' : os.platform()
+  const arch = { x64: 'x86_64', arm64: 'aarch64', ia32: 'x86' }[os.arch()] || os.arch()
+  return { platform, arch }
+}
+
 function cliUserAgent(version = resolveCLIVersion()) {
-  return `xai-grok-workspace/${version}`
+  const { platform, arch } = cliPlatformLabel()
+  return `grok-pager/${version} grok-shell/${version} (${platform}; ${arch})`
 }
 
 function shouldApplyCLIProxyHeaders(targetUrl) {
@@ -546,6 +558,8 @@ function applyCLIProxyHeaders(headers = {}, targetUrl) {
     'X-XAI-Token-Auth': CLI_TOKEN_AUTH,
     'x-grok-client-version': version,
     'x-grok-client-identifier': CLI_CLIENT_IDENTIFIER,
+    'x-grok-client-mode': CLI_CLIENT_MODE,
+    'x-authenticateresponse': CLI_AUTHENTICATE_RESPONSE,
     'User-Agent': cliUserAgent(version)
   }
 }

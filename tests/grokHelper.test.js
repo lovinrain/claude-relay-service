@@ -178,20 +178,38 @@ describe('grokHelper upstream modes', () => {
         'https://cli-chat-proxy.grok.com/v1/responses'
       )
       expect(cliHeaders['X-XAI-Token-Auth']).toBe('xai-grok-cli')
-      expect(cliHeaders['x-grok-client-identifier']).toBe('grok-shell')
+      expect(cliHeaders['x-grok-client-identifier']).toBe('grok-pager')
+      expect(cliHeaders['x-grok-client-mode']).toBe('interactive')
+      expect(cliHeaders['x-authenticateresponse']).toBe('authenticate-response')
+      expect(cliHeaders['x-grok-client-version']).toBe('1.0.46')
       expect(cliHeaders['x-grok-client-version']).toBe(grokHelper.CLI_CLIENT_VERSION)
       expect(cliHeaders['User-Agent']).toBe(grokHelper.cliUserAgent())
+      expect(cliHeaders['User-Agent']).toMatch(
+        /^grok-pager\/1\.0\.46 grok-shell\/1\.0\.46 \([a-z0-9_.]+; [a-z0-9_]+\)$/
+      )
 
       const apiHeaders = grokHelper.applyCLIProxyHeaders(
-        { Authorization: 'Bearer tok' },
+        { Authorization: 'Bearer tok', 'User-Agent': 'direct-api-client/1.0' },
         'https://api.x.ai/v1/responses'
       )
       expect(apiHeaders['X-XAI-Token-Auth']).toBeUndefined()
+      expect(apiHeaders['x-grok-client-version']).toBeUndefined()
+      expect(apiHeaders['x-grok-client-mode']).toBeUndefined()
+      expect(apiHeaders['x-authenticateresponse']).toBeUndefined()
+      expect(apiHeaders['User-Agent']).toBe('direct-api-client/1.0')
     })
 
     it('drops CLI version overrides below the stable floor', () => {
-      process.env.XAI_GROK_CLI_VERSION = '0.2.1'
-      expect(grokHelper.resolveCLIVersion()).toBe(grokHelper.CLI_CLIENT_VERSION)
+      for (const version of ['0.2.1', '0.2.93', '0.2.120', '1.0.12', '1.0.13-beta.1']) {
+        process.env.XAI_GROK_CLI_VERSION = version
+        expect(grokHelper.resolveCLIVersion()).toBe(grokHelper.CLI_CLIENT_VERSION)
+      }
+    })
+
+    it('accepts a CLI version override at or above the stable floor', () => {
+      process.env.XAI_GROK_CLI_VERSION = '1.0.47'
+      expect(grokHelper.resolveCLIVersion()).toBe('1.0.47')
+      expect(grokHelper.isSupportedCLIVersion('1.0.13')).toBe(true)
     })
   })
 
