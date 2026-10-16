@@ -20,22 +20,16 @@ const userMessageQueueService = require('../userMessageQueueService')
 const { isStreamWritable } = require('../../utils/streamHelper')
 const upstreamErrorHelper = require('../../utils/upstreamErrorHelper')
 const metadataUserIdHelper = require('../../utils/metadataUserIdHelper')
+const cloneJsonBody = require('../../utils/cloneJsonBody')
 const {
   getHttpsAgentForStream,
   getHttpsAgentForNonStream,
   getPricingData
 } = require('../../utils/performanceOptimizer')
 
-// structuredClone polyfill for Node < 17
-const safeClone =
-  typeof structuredClone === 'function' ? structuredClone : (obj) => JSON.parse(JSON.stringify(obj))
-
 class ClaudeRelayService {
   constructor() {
     this.claudeApiUrl = 'https://api.anthropic.com/v1/messages?beta=true'
-    // 🧹 内存优化：用于存储请求体字符串，避免闭包捕获
-    this.bodyStore = new Map()
-    this._bodyStoreIdCounter = 0
     this.apiVersion = config.claude.apiVersion
     this.betaHeader = config.claude.betaHeader
     this.systemPrompt = config.claude.systemPrompt
@@ -489,7 +483,6 @@ class ClaudeRelayService {
     let queueLockAcquired = false
     let queueRequestId = null
     let selectedAccountId = null
-    let bodyStoreIdNonStream = null // 🧹 在 try 块外声明，以便 finally 清理
 
     try {
       // 调试日志：查看API Key数据
@@ -665,10 +658,6 @@ class ClaudeRelayService {
 
       const isRealClaudeCodeRequest = this._isActualClaudeCodeRequest(requestBody, clientHeaders)
       const processedBody = this._processRequestBody(requestBody, account, isRealClaudeCodeRequest)
-      // 🧹 内存优化：存储到 bodyStore，避免闭包捕获
-      const originalBodyString = JSON.stringify(processedBody)
-      bodyStoreIdNonStream = ++this._bodyStoreIdCounter
-      this.bodyStore.set(bodyStoreIdNonStream, originalBodyString)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -696,16 +685,10 @@ class ClaudeRelayService {
         let shouldRetry = false
 
         do {
-          // 🧹 每次重试从 bodyStore 解析新对象，避免闭包捕获
-          let retryRequestBody
-          try {
-            retryRequestBody = JSON.parse(this.bodyStore.get(bodyStoreIdNonStream))
-          } catch (parseError) {
-            logger.error(`❌ Failed to parse body for retry: ${parseError.message}`)
-            throw new Error(`Request body parse failed: ${parseError.message}`)
-          }
+          // Each attempt copies containers during preparation, leaving this
+          // retry template intact without retaining another full JSON string.
           response = await this._makeClaudeRequest(
-            retryRequestBody,
+            processedBody,
             accessToken,
             proxyAgent,
             clientHeaders,
@@ -1088,10 +1071,6 @@ class ClaudeRelayService {
       )
       throw error
     } finally {
-      // 🧹 清理 bodyStore
-      if (bodyStoreIdNonStream !== null) {
-        this.bodyStore.delete(bodyStoreIdNonStream)
-      }
       // 📬 释放用户消息队列锁（兜底，正常情况下已在请求发送后提前释放）
       if (queueLockAcquired && queueRequestId && selectedAccountId) {
         try {
@@ -1198,8 +1177,7 @@ class ClaudeRelayService {
       return body
     }
 
-    // 使用 safeClone 替代 JSON.parse(JSON.stringify()) 提升性能
-    const processedBody = safeClone(body)
+    const processedBody = cloneJsonBody(body)
 
     processedBody.messages = this._patchOrphanedToolUse(processedBody.messages)
 
@@ -1612,7 +1590,9 @@ class ClaudeRelayService {
 
     // 如果不是真实的 Claude Code 请求，需要使用从账户获取的 Claude Code headers
     let finalHeaders = { ...filteredHeaders }
-    let requestPayload = body
+    // Identity and tool-name transforms can mutate nested fields. Keep the
+    // template reusable for retries while sharing its immutable payload data.
+    let requestPayload = cloneJsonBody(body)
 
     if (!isRealClaudeCode) {
       const claudeCodeHeaders = await claudeCodeHeadersService.getAccountHeaders(accountId)
@@ -1646,9 +1626,10 @@ class ClaudeRelayService {
       })
     }
 
-    // 序列化请求体，计算 content-length
-    const bodyString = JSON.stringify(requestPayload)
-    const contentLength = Buffer.byteLength(bodyString, 'utf8')
+    // Only the wire representation is serialized. Retain UTF-8 bytes while
+    // uploading, rather than a potentially two-byte JSON string on the heap.
+    const bodyBuffer = Buffer.from(JSON.stringify(requestPayload), 'utf8')
+    const contentLength = bodyBuffer.length
 
     // 构建最终请求头（包含认证、版本、User-Agent、Beta 等）
     // Force identity encoding to prevent upstream (Cloudflare) from returning
@@ -1685,8 +1666,7 @@ class ClaudeRelayService {
     const clientBetaHeader = this._getHeaderValueCaseInsensitive(clientHeaders, 'anthropic-beta')
     headers['anthropic-beta'] = this._getBetaHeader(modelId, clientBetaHeader)
     return {
-      requestPayload,
-      bodyString,
+      bodyBuffer,
       headers,
       isRealClaudeCode,
       toolNameMap
@@ -1739,7 +1719,7 @@ class ClaudeRelayService {
     const account = await claudeAccountService.getAccount(accountId)
 
     // 使用公共方法准备请求头和 payload
-    const prepared = await this._prepareRequestHeadersAndPayload(
+    let prepared = await this._prepareRequestHeadersAndPayload(
       body,
       clientHeaders,
       accountId,
@@ -1755,7 +1735,6 @@ class ClaudeRelayService {
       return prepared.abortResponse
     }
 
-    let { bodyString } = prepared
     const { headers, isRealClaudeCode, toolNameMap } = prepared
 
     return new Promise((resolve, reject) => {
@@ -1871,11 +1850,10 @@ class ClaudeRelayService {
         reject(new Error('Request timeout'))
       })
 
-      // 写入请求体
-      req.write(bodyString)
-      // 🧹 内存优化：立即清空 bodyString 引用，避免闭包捕获
-      bodyString = null
-      req.end()
+      req.end(prepared.bodyBuffer)
+      // The HTTP client owns the bytes until they are flushed. Do not retain
+      // them in response callbacks for the rest of a long-running request.
+      prepared = null
     })
   }
 
@@ -2075,10 +2053,6 @@ class ClaudeRelayService {
 
       const isRealClaudeCodeRequest = this._isActualClaudeCodeRequest(requestBody, clientHeaders)
       const processedBody = this._processRequestBody(requestBody, account, isRealClaudeCodeRequest)
-      // 🧹 内存优化：存储到 bodyStore，不放入 requestOptions 避免闭包捕获
-      const originalBodyString = JSON.stringify(processedBody)
-      const bodyStoreId = ++this._bodyStoreIdCounter
-      this.bodyStore.set(bodyStoreId, originalBodyString)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -2102,7 +2076,6 @@ class ClaudeRelayService {
         streamTransformer,
         {
           ...options,
-          bodyStoreId,
           isRealClaudeCodeRequest
         },
         isDedicatedOfficialAccount,
@@ -2176,7 +2149,7 @@ class ClaudeRelayService {
     const isOpusModelRequest = requestModelFamily === 'opus'
 
     // 使用公共方法准备请求头和 payload
-    const prepared = await this._prepareRequestHeadersAndPayload(
+    let prepared = await this._prepareRequestHeadersAndPayload(
       body,
       clientHeaders,
       accountId,
@@ -2194,7 +2167,6 @@ class ClaudeRelayService {
       return prepared.abortResponse
     }
 
-    let { bodyString } = prepared
     const { headers, toolNameMap } = prepared
     const toolNameStreamTransformer = this._createToolNameStripperStreamTransformer(
       streamTransformer,
@@ -2432,23 +2404,10 @@ class ClaudeRelayService {
               await this._sleep(2000)
 
               try {
-                // 递归调用自身进行重试
-                // 🧹 从 bodyStore 获取字符串用于重试
-                if (
-                  !requestOptions.bodyStoreId ||
-                  !this.bodyStore.has(requestOptions.bodyStoreId)
-                ) {
-                  throw new Error('529 retry requires valid bodyStoreId')
-                }
-                let retryBody
-                try {
-                  retryBody = JSON.parse(this.bodyStore.get(requestOptions.bodyStoreId))
-                } catch (parseError) {
-                  logger.error(`❌ Failed to parse body for 529 retry: ${parseError.message}`)
-                  throw new Error(`529 retry body parse failed: ${parseError.message}`)
-                }
+                // Preparation leaves body unchanged, so retries can reuse it
+                // without serializing and parsing the entire payload again.
                 const retryResult = await this._makeClaudeStreamRequestWithUsageCapture(
-                  retryBody,
+                  body,
                   accessToken,
                   proxyAgent,
                   clientHeaders,
@@ -2575,21 +2534,11 @@ class ClaudeRelayService {
             )
             if (
               this._isClaudeCodeCredentialError(errorData) &&
-              requestOptions.useRandomizedToolNames !== true &&
-              requestOptions.bodyStoreId &&
-              this.bodyStore.has(requestOptions.bodyStoreId)
+              requestOptions.useRandomizedToolNames !== true
             ) {
-              let retryBody
-              try {
-                retryBody = JSON.parse(this.bodyStore.get(requestOptions.bodyStoreId))
-              } catch (parseError) {
-                logger.error(`❌ Failed to parse body for 403 retry: ${parseError.message}`)
-                reject(new Error(`403 retry body parse failed: ${parseError.message}`))
-                return
-              }
               try {
                 const retryResult = await this._makeClaudeStreamRequestWithUsageCapture(
-                  retryBody,
+                  body,
                   accessToken,
                   proxyAgent,
                   clientHeaders,
@@ -3056,10 +3005,6 @@ class ClaudeRelayService {
             }
           }
 
-          // 🧹 清理 bodyStore
-          if (requestOptions.bodyStoreId) {
-            this.bodyStore.delete(requestOptions.bodyStoreId)
-          }
           logger.debug('🌊 Claude stream response with usage capture completed')
           resolve()
         })
@@ -3116,10 +3061,6 @@ class ClaudeRelayService {
           )
           responseStream.end()
         }
-        // 🧹 清理 bodyStore
-        if (requestOptions.bodyStoreId) {
-          this.bodyStore.delete(requestOptions.bodyStoreId)
-        }
         reject(error)
       })
 
@@ -3149,10 +3090,6 @@ class ClaudeRelayService {
           )
           responseStream.end()
         }
-        // 🧹 清理 bodyStore
-        if (requestOptions.bodyStoreId) {
-          this.bodyStore.delete(requestOptions.bodyStoreId)
-        }
         reject(new Error('Request timeout'))
       })
 
@@ -3164,11 +3101,8 @@ class ClaudeRelayService {
         }
       })
 
-      // 写入请求体
-      req.write(bodyString)
-      // 🧹 内存优化：立即清空 bodyString 引用，避免闭包捕获
-      bodyString = null
-      req.end()
+      req.end(prepared.bodyBuffer)
+      prepared = null
     })
   }
 

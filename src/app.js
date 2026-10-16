@@ -12,6 +12,7 @@ const redis = require('./models/redis')
 const pricingService = require('./services/pricingService')
 const cacheMonitor = require('./utils/cacheMonitor')
 const { getSafeMessage } = require('./utils/errorSanitizer')
+const verifyJsonBody = require('./utils/jsonBodyVerifier')
 
 // Import routes
 const apiRoutes = require('./routes/api')
@@ -234,12 +235,7 @@ class Application {
       this.app.use(
         express.json({
           limit: '100mb',
-          verify: (req, res, buf, encoding) => {
-            // 验证JSON格式
-            if (buf && buf.length && !buf.toString(encoding || 'utf8').trim()) {
-              throw new Error('Invalid JSON: empty body')
-            }
-          }
+          verify: verifyJsonBody
         })
       )
       this.app.use(express.urlencoded({ extended: true, limit: '100mb' }))
