@@ -1780,16 +1780,8 @@ const requestLogger = (req, res, next) => {
   const isDebugRoute = req.originalUrl.includes('event_logging')
   if (req.originalUrl !== '/health') {
     logger.debug(`▶ [${requestId}] ${req.method} ${req.originalUrl}`, {
-      ip: clientIP,
-      body: req.body && Object.keys(req.body).length > 0 ? req.body : undefined
+      ip: clientIP
     })
-  }
-
-  // 拦截 res.json() 捕获响应体
-  const originalJson = res.json.bind(res)
-  res.json = (body) => {
-    res._responseBody = body
-    return originalJson(body)
   }
 
   res.on('finish', () => {
@@ -1810,20 +1802,26 @@ const requestLogger = (req, res, next) => {
     // 构建树形 metadata
     const meta = { requestId }
 
-    // 请求体（非 GET 且有内容时显示）
-    if (req.method !== 'GET' && req.body && Object.keys(req.body).length > 0) {
-      meta.req = req.body
+    // Log scalar metadata only. Never retain or serialize conversation/image
+    // bodies, including at debug level or for failed requests.
+    const requestBytes = req.get('Content-Length')
+    if (requestBytes) {
+      meta.requestBytes = requestBytes
+    }
+    if (typeof req.body?.model === 'string') {
+      meta.model = req.body.model.slice(0, 200)
+    }
+    if (Array.isArray(req.body?.messages)) {
+      meta.messageCount = req.body.messages.length
+    }
+    if (typeof req.body?.stream === 'boolean') {
+      meta.stream = req.body.stream
     }
 
     // 查询参数（GET 请求且有查询参数时单独显示）
     const queryIdx = req.originalUrl.indexOf('?')
     if (queryIdx > -1) {
       meta.query = req.originalUrl.substring(queryIdx + 1)
-    }
-
-    // 响应体
-    if (res._responseBody) {
-      meta.res = res._responseBody
     }
 
     // API Key 信息（合并到同一条日志）
@@ -1836,7 +1834,7 @@ const requestLogger = (req, res, next) => {
       meta.auth = req._authInfo
     }
 
-    // 完整信息写入文件
+    // Client metadata; response status, duration and size are in the message.
     meta.ip = clientIP
     meta.ua = userAgent
     meta.referer = referer

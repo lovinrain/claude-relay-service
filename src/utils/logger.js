@@ -5,116 +5,7 @@ const { formatDateWithTimezone } = require('../utils/dateHelper')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
-
-// 安全的 JSON 序列化函数，处理循环引用和特殊字符
-const safeStringify = (obj, maxDepth = Infinity) => {
-  const seen = new WeakSet()
-
-  const replacer = (key, value, depth = 0) => {
-    if (depth > maxDepth) {
-      return '[Max Depth Reached]'
-    }
-
-    // 处理字符串值，清理可能导致JSON解析错误的特殊字符
-    if (typeof value === 'string') {
-      try {
-        // 移除或转义可能导致JSON解析错误的字符
-        const cleanValue = value
-          // eslint-disable-next-line no-control-regex
-          .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // 移除控制字符
-          .replace(/[\uD800-\uDFFF]/g, '') // 移除孤立的代理对字符
-          // eslint-disable-next-line no-control-regex
-          .replace(/\u0000/g, '') // 移除NUL字节
-
-        return cleanValue
-      } catch (error) {
-        return '[Invalid String Data]'
-      }
-    }
-
-    if (value !== null && typeof value === 'object') {
-      if (seen.has(value)) {
-        return '[Circular Reference]'
-      }
-      seen.add(value)
-
-      // 过滤掉常见的循环引用对象
-      if (value.constructor) {
-        const constructorName = value.constructor.name
-        if (
-          ['Socket', 'TLSSocket', 'HTTPParser', 'IncomingMessage', 'ServerResponse'].includes(
-            constructorName
-          )
-        ) {
-          return `[${constructorName} Object]`
-        }
-      }
-
-      // 递归处理对象属性
-      if (Array.isArray(value)) {
-        return value.map((item, index) => replacer(index, item, depth + 1))
-      } else {
-        const result = {}
-        for (const [k, v] of Object.entries(value)) {
-          // 确保键名也是安全的
-          // eslint-disable-next-line no-control-regex
-          const safeKey = typeof k === 'string' ? k.replace(/[\u0000-\u001F\u007F]/g, '') : k
-          result[safeKey] = replacer(safeKey, v, depth + 1)
-        }
-        return result
-      }
-    }
-
-    return value
-  }
-
-  try {
-    const processed = replacer('', obj)
-    const result = JSON.stringify(processed)
-    // 体积保护: 超过 50KB 时对大字段做截断，保留顶层结构
-    if (result.length > 50000 && processed && typeof processed === 'object') {
-      const truncated = { ...processed, _truncated: true, _totalChars: result.length }
-      // 第一轮: 截断单个大字段
-      for (const [k, v] of Object.entries(truncated)) {
-        if (k.startsWith('_')) {
-          continue
-        }
-        const fieldStr = typeof v === 'string' ? v : JSON.stringify(v)
-        if (fieldStr && fieldStr.length > 10000) {
-          truncated[k] = `${fieldStr.substring(0, 10000)}...[truncated]`
-        }
-      }
-      // 第二轮: 如果总长度仍超 50KB，逐字段缩减到 2KB
-      let secondResult = JSON.stringify(truncated)
-      if (secondResult.length > 50000) {
-        for (const [k, v] of Object.entries(truncated)) {
-          if (k.startsWith('_')) {
-            continue
-          }
-          const fieldStr = typeof v === 'string' ? v : JSON.stringify(v)
-          if (fieldStr && fieldStr.length > 2000) {
-            truncated[k] = `${fieldStr.substring(0, 2000)}...[truncated]`
-          }
-        }
-        secondResult = JSON.stringify(truncated)
-      }
-      return secondResult
-    }
-    return result
-  } catch (error) {
-    // 如果JSON.stringify仍然失败，使用更保守的方法
-    try {
-      return JSON.stringify({
-        error: 'Failed to serialize object',
-        message: error.message,
-        type: typeof obj,
-        keys: obj && typeof obj === 'object' ? Object.keys(obj) : undefined
-      })
-    } catch (finalError) {
-      return '{"error":"Critical serialization failure","message":"Unable to serialize any data"}'
-    }
-  }
-}
+const { safeStringify, sanitizeLogData, MAX_LOG_CHARS } = require('./logSerializer')
 
 // 控制台不显示的 metadata 字段（已在 message 中或低价值）
 const CONSOLE_SKIP_KEYS = new Set(['type', 'level', 'message', 'timestamp', 'stack'])
@@ -125,7 +16,8 @@ const createConsoleFormat = () =>
     winston.format.timestamp({ format: () => formatDateWithTimezone(new Date(), false) }),
     winston.format.errors({ stack: true }),
     winston.format.colorize(),
-    winston.format.printf(({ level: _level, message, timestamp, stack, ...rest }) => {
+    winston.format.printf((info) => {
+      const { level: _level, message, timestamp, stack, ...rest } = sanitizeLogData(info)
       // 时间戳只取时分秒
       const shortTime = timestamp ? timestamp.split(' ').pop() : ''
 
@@ -140,7 +32,7 @@ const createConsoleFormat = () =>
           const isLast = i === entries.length - 1
           const branch = isLast ? '└─' : '├─'
           const displayValue =
-            value !== null && typeof value === 'object' ? safeStringify(value) : String(value)
+            value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value)
           logMessage += `\n${indent}${branch} ${key}: ${displayValue}`
         })
       }
@@ -148,7 +40,9 @@ const createConsoleFormat = () =>
       if (stack) {
         logMessage += `\n${stack}`
       }
-      return logMessage
+      return logMessage.length > MAX_LOG_CHARS
+        ? `${logMessage.slice(0, MAX_LOG_CHARS - 14)}...[truncated]`
+        : logMessage
     })
   )
 
@@ -233,7 +127,7 @@ const authDetailLogger = winston.createLogger({
     winston.format.timestamp({ format: () => formatDateWithTimezone(new Date(), false) }),
     winston.format.printf(({ level, message, timestamp, data }) => {
       // 使用更深的深度和格式化的JSON输出
-      const jsonData = data ? JSON.stringify(data, null, 2) : '{}'
+      const jsonData = data ? safeStringify(data) : '{}'
       return `[${timestamp}] ${level.toUpperCase()}: ${message}\n${jsonData}\n${'='.repeat(80)}`
     })
   ),
@@ -244,7 +138,12 @@ const authDetailLogger = winston.createLogger({
 // 🌟 增强的 Winston logger
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || config.logging.level,
-  format: fileFormat,
+  // Winston normally filters levels at the transport, after global formatting.
+  // Reject disabled levels before even the bounded serialization work.
+  format: winston.format.combine(
+    winston.format((info) => (logger.isLevelEnabled(info.level) ? info : false))(),
+    fileFormat
+  ),
   transports: [
     // 📄 文件输出
     dailyRotateFileTransport,
